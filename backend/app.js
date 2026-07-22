@@ -17,7 +17,7 @@ app.use((req, res, next) => {
 
 app.use((err, req, res, next) => {
     return res.status(err.statusCode || 500).json({
-        messagg: err.message || 'Lỗi máy chủ nội bộ!',
+        message: err.message || 'Lỗi máy chủ nội bộ!',
     });
 });
 
