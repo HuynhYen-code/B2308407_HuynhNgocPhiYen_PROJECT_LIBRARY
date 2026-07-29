@@ -1,33 +1,50 @@
 const mongoose = require('mongoose');
 
-const readerSchema = new mongoose.Schema(
+/**
+ * DocGia – Hồ sơ độc giả, liên kết 1-1 với TaiKhoan
+ */
+const docGiaSchema = new mongoose.Schema(
     {
-        userId: {
+        MaTaiKhoan: {
             type: mongoose.Schema.Types.ObjectId,
             ref: 'User',
             required: true,
             unique: true,
         },
-        fullName: {
+        HoTen: {
             type: String,
             required: [true, 'Họ tên không được bỏ trống'],
+            trim: true,
         },
-        birthDate: {
+        NgaySinh: {
             type: Date,
         },
-        gender: {
+        Phai: {
             type: String,
-            enum: ['Male', 'Female', 'Other'],
+            enum: ['Nam', 'Nu', 'Khac'],
         },
-        address: {
+        DiaChi: {
             type: String,
+            trim: true,
         },
-        phone: {
+        DienThoai: {
             type: String,
-            required: true,
+            required: [true, 'Số điện thoại không được bỏ trống'],
+            trim: true,
+        },
+        /**
+         * TrangThaiHoSo – Trạng thái xác minh hồ sơ độc giả:
+         * - ChuaXacMinh : Tự đăng ký online, chờ nhân viên xác minh CCCD tại quầy
+         * - DaXacMinh   : Đã xác minh, được phép tạo phiếu mượn
+         * - BiKhoa      : Bị khóa do vi phạm quy định
+         */
+        TrangThaiHoSo: {
+            type: String,
+            enum: ['ChuaXacMinh', 'DaXacMinh', 'BiKhoa'],
+            default: 'ChuaXacMinh',
         },
     },
     { timestamps: true }
 );
 
-module.exports = mongoose.model('Reader', readerSchema);
+module.exports = mongoose.model('DocGia', docGiaSchema);
