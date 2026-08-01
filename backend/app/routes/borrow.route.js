@@ -32,6 +32,9 @@ router.get('/:id', verifyToken, borrowController.getById);
 // Độc giả tạo yêu cầu mượn
 router.post('/', verifyToken, requireRole('Reader'), borrowController.create);
 
+// Độc giả tự hủy phiếu mượn
+router.patch('/:id/cancel', verifyToken, requireRole('Reader'), borrowController.cancel);
+
 // Nhân viên duyệt / từ chối
 router.patch('/:id/approve', verifyToken, requireRole('Staff', 'Admin'), borrowController.approve);
 router.patch('/:id/reject', verifyToken, requireRole('Staff', 'Admin'), borrowController.reject);

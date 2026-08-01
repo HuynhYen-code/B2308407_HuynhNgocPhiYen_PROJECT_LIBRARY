@@ -39,6 +39,10 @@ const dauSachSchema = new mongoose.Schema(
             type: String,
             trim: true,
         },
+        LuotMuon: {
+            type: Number,
+            default: 0,
+        }
     },
     { timestamps: true }
 );

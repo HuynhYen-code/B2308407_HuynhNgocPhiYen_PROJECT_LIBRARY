@@ -3,6 +3,7 @@ const jwt = require('jsonwebtoken');
 const User = require('../models/user.model');
 const config = require('../config');
 const ApiError = require('../utils/api-error');
+const DocGia = require('../models/reader.model');
 
 /**
  * POST /api/auth/register
@@ -67,6 +68,14 @@ exports.login = async (req, res, next) => {
             return next(new ApiError(401, 'Tên đăng nhập hoặc mật khẩu không chính xác'));
         }
 
+        if (user.role === 'Staff') {
+            const NhanVien = require('../models/staff.model');
+            const staff = await NhanVien.findOne({ MaTaiKhoan: user._id });
+            if (staff && staff.TrangThai === 'NghiViec') {
+                return next(new ApiError(401, 'Tài khoản nhân viên này đã bị đình chỉ hoặc cho nghỉ việc. Vui lòng liên hệ quản trị viên.'));
+            }
+        }
+
         const payload = {
             id: user._id,
             role: user.role,
@@ -77,6 +86,15 @@ exports.login = async (req, res, next) => {
         });
 
         const { password: _pw, ...userData } = user.toObject();
+
+        let accountStatus = 'HoatDong';
+        if (userData.role === 'Reader') {
+            const reader = await DocGia.findOne({ MaTaiKhoan: user._id });
+            if (reader && reader.TrangThaiHoSo) {
+                accountStatus = reader.TrangThaiHoSo;
+            }
+        }
+        userData.accountStatus = accountStatus;
 
         return res.status(200).json({
             data: userData,
@@ -98,7 +116,16 @@ exports.getMe = async (req, res, next) => {
         if (!user) {
             return next(new ApiError(404, 'Không tìm thấy tài khoản'));
         }
-        return res.status(200).json({ data: user });
+        const userObj = user.toObject();
+        let accountStatus = 'HoatDong';
+        if (userObj.role === 'Reader') {
+            const reader = await DocGia.findOne({ MaTaiKhoan: userObj._id });
+            if (reader && reader.TrangThaiHoSo) {
+                accountStatus = reader.TrangThaiHoSo;
+            }
+        }
+        userObj.accountStatus = accountStatus;
+        return res.status(200).json({ data: userObj });
     } catch (error) {
         return next(new ApiError(500, 'Lỗi hệ thống'));
     }

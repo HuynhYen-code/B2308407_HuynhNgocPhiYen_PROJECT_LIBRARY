@@ -163,7 +163,7 @@ async function task2_ProcessOverdue(today) {
             // Thông báo là kết quả phụ họa từ biến đổi trạng thái
             notifications.push({
                 MaTaiKhoan: reader.MaTaiKhoan,
-                TieuDe: '🚨 Quá hạn trả sách - Phát sinh phí phạt',
+                TieuDe: 'Quá hạn trả sách - Phát sinh phí phạt',
                 NoiDung: `Bạn đã trễ hạn trả sách trong phiếu #${record._id} được ${soNgayTre} ngày. Tiền phạt hiện tại: ${tienPhat.toLocaleString('vi-VN')} VNĐ (${finePerDay.toLocaleString('vi-VN')} VNĐ/ngày). Vui lòng đến thư viện trả sách ngay để tránh phát sinh thêm phí.`,
                 NgayTao: new Date(),
             });
@@ -180,13 +180,13 @@ async function task2_ProcessOverdue(today) {
     if (bulkOps.length > 0) {
         await PhieuMuon.bulkWrite(bulkOps);
         console.log(
-            `[Task 2] ✅ Đã cập nhật ${totalOverdueDetails} chi tiết → QuaHan + ghi TienPhat vào DB`
+            `[Task 2] Đã cập nhật ${totalOverdueDetails} chi tiết → QuaHan + ghi TienPhat vào DB`
         );
     }
 
     // Gửi thông báo (kết quả phụ)
     await bulkNotify(notifications);
-    console.log(`[Task 2] 📢 Đã gửi ${notifications.length} thông báo quá hạn.`);
+    console.log(`[Task 2] Đã gửi ${notifications.length} thông báo quá hạn.`);
 }
 
 // ─────────────────────────────────────────────────────────────

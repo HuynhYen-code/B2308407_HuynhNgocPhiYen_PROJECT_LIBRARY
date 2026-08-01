@@ -4,11 +4,16 @@ const cors = require('cors');
 const ApiError = require('./app/utils/api-error');
 const routes = require('./app/routes');
 
+const path = require('path');
+
 const app = express();
 
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Phục vụ các file tĩnh trong thư mục uploads
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Root endpoint
 app.get('/', (req, res) => {

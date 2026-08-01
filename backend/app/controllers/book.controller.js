@@ -12,7 +12,7 @@ const ApiError = require('../utils/api-error');
  */
 exports.getAll = async (req, res, next) => {
     try {
-        const { search, category, publisher, page = 1, limit = 12 } = req.query;
+        const { search, category, publisher, sort, page = 1, limit = 12 } = req.query;
         const skip = (parseInt(page) - 1) * parseInt(limit);
 
         const filter = {};
@@ -29,11 +29,27 @@ exports.getAll = async (req, res, next) => {
             filter.NhaXuatBanId = publisher;
         }
 
+        let sortOptions = { NamXuatBan: -1, _id: 1 };
+        
+        if (search && !sort) {
+            sortOptions = { score: { $meta: 'textScore' } };
+        } else if (sort === 'priceAsc') {
+            sortOptions = { DonGia: 1, _id: 1 };
+        } else if (sort === 'priceDesc') {
+            sortOptions = { DonGia: -1, _id: 1 };
+        } else if (sort === 'nameAsc') {
+            sortOptions = { TenSach: 1, _id: 1 };
+        } else if (sort === 'nameDesc') {
+            sortOptions = { TenSach: -1, _id: 1 };
+        } else if (sort === 'popular') {
+            sortOptions = { LuotMuon: -1, _id: 1 };
+        }
+
         const [books, total] = await Promise.all([
             DauSach.find(filter)
                 .populate('TheLoaiIds', 'TenTheLoai')
                 .populate('NhaXuatBanId', 'TenNXB')
-                .sort(search ? { score: { $meta: 'textScore' } } : { createdAt: -1 })
+                .sort(sortOptions)
                 .skip(skip)
                 .limit(parseInt(limit)),
             DauSach.countDocuments(filter),

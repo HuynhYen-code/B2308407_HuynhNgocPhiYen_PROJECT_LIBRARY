@@ -8,6 +8,7 @@ router.get('/', verifyToken, requireRole('Admin'), staffController.getAll);
 router.get('/:id', verifyToken, requireRole('Admin'), staffController.getById);
 router.post('/', verifyToken, requireRole('Admin'), staffController.create);
 router.put('/:id', verifyToken, requireRole('Admin'), staffController.update);
+router.patch('/:id/credentials', verifyToken, requireRole('Admin'), staffController.resetCredentials);
 router.delete('/:id', verifyToken, requireRole('Admin'), staffController.remove);
 
 module.exports = router;

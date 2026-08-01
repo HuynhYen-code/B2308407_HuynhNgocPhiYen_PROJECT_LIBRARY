@@ -14,7 +14,7 @@ exports.getMyNotifications = async (req, res, next) => {
         if (daDoc !== undefined) filter.DaDoc = daDoc === 'true';
 
         const [notifications, total, unreadCount] = await Promise.all([
-            ThongBao.find(filter).sort({ NgayTao: -1 }).skip(skip).limit(parseInt(limit)),
+            ThongBao.find(filter).sort({ NgayTao: -1, _id: 1 }).skip(skip).limit(parseInt(limit)),
             ThongBao.countDocuments(filter),
             ThongBao.countDocuments({ MaTaiKhoan: req.user.id, DaDoc: false }),
         ]);

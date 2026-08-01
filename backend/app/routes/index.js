@@ -10,5 +10,6 @@ router.use('/books', require('./book.route'));
 router.use('/book-copies', require('./book-copy.route'));
 router.use('/borrows', require('./borrow.route'));
 router.use('/notifications', require('./notification.route'));
+router.use('/upload', require('./upload.route'));
 
 module.exports = router;

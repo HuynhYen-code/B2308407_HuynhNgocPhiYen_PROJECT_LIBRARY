@@ -9,7 +9,19 @@ const ApiError = require('../utils/api-error');
  */
 exports.getAll = async (req, res, next) => {
     try {
-        const staff = await NhanVien.find().populate('MaTaiKhoan', '-password').sort({ createdAt: -1 });
+        const { search } = req.query;
+        let query = {};
+        
+        if (search) {
+            query = {
+                $or: [
+                    { HoTenNV: { $regex: search, $options: 'i' } },
+                    { SoDienThoai: { $regex: search, $options: 'i' } }
+                ]
+            };
+        }
+
+        const staff = await NhanVien.find(query).populate('MaTaiKhoan', '-password').sort({ createdAt: -1 });
         return res.status(200).json({ data: staff });
     } catch (error) {
         return next(new ApiError(500, 'Lỗi khi lấy danh sách nhân viên'));
@@ -85,18 +97,53 @@ exports.update = async (req, res, next) => {
 
 /**
  * DELETE /api/staff/:id
- * Xóa nhân viên + tài khoản (Admin)
+ * Cập nhật trạng thái nhân viên thành nghỉ việc (thay thế xóa cứng)
  */
 exports.remove = async (req, res, next) => {
     try {
-        const staff = await NhanVien.findByIdAndDelete(req.params.id);
+        const staff = await NhanVien.findById(req.params.id);
         if (!staff) return next(new ApiError(404, 'Không tìm thấy nhân viên'));
 
-        // Xóa luôn tài khoản liên kết
-        await User.findByIdAndDelete(staff.MaTaiKhoan);
+        // Kiểm tra chống tự khóa tài khoản của chính mình
+        if (staff.MaTaiKhoan.toString() === req.user.id) {
+            return next(new ApiError(400, 'Bạn không thể tự vô hiệu hóa tài khoản của chính mình!'));
+        }
 
-        return res.status(200).json({ message: 'Xóa nhân viên thành công' });
+        staff.TrangThai = staff.TrangThai === 'NghiViec' ? 'DangLamViec' : 'NghiViec';
+        await staff.save();
+
+        return res.status(200).json({ message: 'Cập nhật trạng thái nhân viên thành công' });
     } catch (error) {
-        return next(new ApiError(500, 'Lỗi khi xóa nhân viên'));
+        return next(new ApiError(500, 'Lỗi khi cập nhật trạng thái nhân viên'));
+    }
+};
+
+/**
+ * PATCH /api/staff/:id/credentials
+ * Cập nhật tên đăng nhập và mật khẩu (Admin)
+ */
+exports.resetCredentials = async (req, res, next) => {
+    try {
+        const { username, password } = req.body;
+        
+        if (!username || !password) {
+            return next(new ApiError(400, 'Tên đăng nhập và mật khẩu không được bỏ trống'));
+        }
+
+        const staff = await NhanVien.findById(req.params.id);
+        if (!staff) return next(new ApiError(404, 'Không tìm thấy nhân viên'));
+
+        // Kiểm tra xem username mới có bị trùng với user khác không
+        const existingUser = await User.findOne({ username, _id: { $ne: staff.MaTaiKhoan } });
+        if (existingUser) {
+            return next(new ApiError(400, 'Tên đăng nhập đã tồn tại'));
+        }
+
+        const hashedPassword = await bcrypt.hash(password, 10);
+        await User.findByIdAndUpdate(staff.MaTaiKhoan, { username, password: hashedPassword });
+
+        return res.status(200).json({ message: 'Cập nhật thông tin đăng nhập thành công' });
+    } catch (error) {
+        return next(new ApiError(500, 'Lỗi khi cập nhật thông tin đăng nhập'));
     }
 };

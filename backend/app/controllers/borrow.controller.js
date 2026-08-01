@@ -25,25 +25,74 @@ async function createNotification(maTaiKhoan, tieuDe, noiDung) {
 // ─────────────────────────────────────────────────────────────
 exports.getAll = async (req, res, next) => {
     try {
-        const { trangThai, docGiaId, page = 1, limit = 10 } = req.query;
+        const { trangThai, docGiaId, search, ngayLap, page = 1, limit = 10 } = req.query;
         const skip = (parseInt(page) - 1) * parseInt(limit);
 
         const filter = {};
-        if (trangThai) filter.TrangThaiPhieu = trangThai;
+        if (trangThai) {
+            if (trangThai === 'QuaHan') {
+                filter.TrangThaiPhieu = 'DangMuon';
+                filter['ChiTiet.TrangThaiChiTiet'] = 'QuaHan';
+            } else {
+                filter.TrangThaiPhieu = trangThai;
+            }
+        }
         if (docGiaId) filter.DocGiaId = docGiaId;
+
+        if (ngayLap) {
+            const date = new Date(ngayLap);
+            if (!isNaN(date)) {
+                const startOfDay = new Date(date);
+                startOfDay.setHours(0, 0, 0, 0);
+                const endOfDay = new Date(date);
+                endOfDay.setHours(23, 59, 59, 999);
+                filter.NgayLapPhieu = { $gte: startOfDay, $lte: endOfDay };
+            }
+        }
+
+        if (search) {
+            const regex = new RegExp(search, 'i');
+            const readers = await DocGia.find({
+                $or: [{ HoTen: regex }, { DienThoai: regex }]
+            }).select('_id');
+            const readerIds = readers.map(r => r._id);
+
+            filter.$or = [
+                { DocGiaId: { $in: readerIds } },
+                {
+                    $expr: {
+                        $regexMatch: {
+                            input: { $toString: '$_id' },
+                            regex: search,
+                            options: 'i'
+                        }
+                    }
+                }
+            ];
+        }
 
         const [records, total] = await Promise.all([
             PhieuMuon.find(filter)
                 .populate({ path: 'DocGiaId', select: 'HoTen DienThoai' })
                 .populate({ path: 'NhanVienId', select: 'HoTenNV ChucVu' })
-                .sort({ createdAt: -1 })
+                .populate({ path: 'ChiTiet.DauSachId', select: 'TenSach TacGia HinhAnh' })
+                .populate({ path: 'ChiTiet.CuonSachId', select: 'TinhTrangVatLy TrangThai' })
+                .sort({ createdAt: -1, _id: 1 })
                 .skip(skip)
                 .limit(parseInt(limit)),
             PhieuMuon.countDocuments(filter),
         ]);
 
+        const mappedRecords = records.map((r) => {
+            const obj = r.toObject();
+            if (obj.TrangThaiPhieu === 'DangMuon' && obj.ChiTiet && obj.ChiTiet.some(ct => ct.TrangThaiChiTiet === 'QuaHan')) {
+                obj.TrangThaiPhieu = 'QuaHan';
+            }
+            return obj;
+        });
+
         return res.status(200).json({
-            data: records,
+            data: mappedRecords,
             pagination: {
                 total,
                 page: parseInt(page),
@@ -67,9 +116,19 @@ exports.getMy = async (req, res, next) => {
 
         const records = await PhieuMuon.find({ DocGiaId: reader._id })
             .populate({ path: 'NhanVienId', select: 'HoTenNV' })
+            .populate({ path: 'ChiTiet.DauSachId', select: 'TenSach TacGia HinhAnh' })
+            .populate({ path: 'ChiTiet.CuonSachId', select: 'TinhTrangVatLy TrangThai' })
             .sort({ createdAt: -1 });
 
-        return res.status(200).json({ data: records });
+        const mappedRecords = records.map((r) => {
+            const obj = r.toObject();
+            if (obj.TrangThaiPhieu === 'DangMuon' && obj.ChiTiet && obj.ChiTiet.some(ct => ct.TrangThaiChiTiet === 'QuaHan')) {
+                obj.TrangThaiPhieu = 'QuaHan';
+            }
+            return obj;
+        });
+
+        return res.status(200).json({ data: mappedRecords });
     } catch (error) {
         return next(new ApiError(500, 'Lỗi khi lấy phiếu mượn'));
     }
@@ -83,8 +142,9 @@ exports.getById = async (req, res, next) => {
     try {
         const record = await PhieuMuon.findById(req.params.id)
             .populate({ path: 'DocGiaId', select: 'HoTen DienThoai DiaChi' })
-            .populate({ path: 'NhanVienId', select: 'HoTenNV ChucVu SoDienThoai' });
-
+            .populate({ path: 'NhanVienId', select: 'HoTenNV ChucVu' })
+            .populate({ path: 'ChiTiet.DauSachId', select: 'TenSach TacGia HinhAnh' })
+            .populate({ path: 'ChiTiet.CuonSachId', select: 'TinhTrangVatLy TrangThai' });
         if (!record) return next(new ApiError(404, 'Không tìm thấy phiếu mượn'));
 
         // Phân quyền: Reader chỉ xem phiếu của chính mình
@@ -95,7 +155,12 @@ exports.getById = async (req, res, next) => {
             }
         }
 
-        return res.status(200).json({ data: record });
+        const obj = record.toObject();
+        if (obj.TrangThaiPhieu === 'DangMuon' && obj.ChiTiet && obj.ChiTiet.some(ct => ct.TrangThaiChiTiet === 'QuaHan')) {
+            obj.TrangThaiPhieu = 'QuaHan';
+        }
+
+        return res.status(200).json({ data: obj });
     } catch (error) {
         return next(new ApiError(500, 'Lỗi khi lấy thông tin phiếu mượn'));
     }
@@ -103,14 +168,16 @@ exports.getById = async (req, res, next) => {
 
 // ─────────────────────────────────────────────────────────────
 // POST /api/borrows
-// Độc giả tạo yêu cầu mượn sách → TrangThaiPhieu = 'ChoDuyet'
+// Độc giả tạo yêu cầu mượn sách.
+// Body: { dauSachIds: [ObjectId, ...] } – Danh sách đầu sách muốn mượn.
+// Độc giả KHÔNG chọn bản copy – nhân viên sẽ gán khi duyệt.
 // ─────────────────────────────────────────────────────────────
 exports.create = async (req, res, next) => {
     try {
-        const { cuonSachIds } = req.body; // Mảng các CuonSach._id (string)
+        const { dauSachIds } = req.body;
 
-        if (!cuonSachIds || !Array.isArray(cuonSachIds) || cuonSachIds.length === 0) {
-            return next(new ApiError(400, 'Danh sách cuốn sách mượn không hợp lệ'));
+        if (!dauSachIds || !Array.isArray(dauSachIds) || dauSachIds.length === 0) {
+            return next(new ApiError(400, 'Danh sách đầu sách mượn không hợp lệ'));
         }
 
         // Tìm hồ sơ độc giả
@@ -121,56 +188,48 @@ exports.create = async (req, res, next) => {
 
         // ── GUARD: Kiểm tra trạng thái hồ sơ ──────────────────────────
         if (reader.TrangThaiHoSo === 'ChuaXacMinh') {
-            return next(
-                new ApiError(
-                    403,
-                    'Hồ sơ của bạn chưa được xác minh. ' +
-                        'Vui lòng mang CCCD/CMND đến quầy thư viện để nhân viên kích hoạt tài khoản mượn sách.'
-                )
-            );
+            return next(new ApiError(403,
+                'Hồ sơ của bạn chưa được xác minh. ' +
+                'Vui lòng mang CCCD/CMND đến quầy thư viện để nhân viên kích hoạt tài khoản mượn sách.'
+            ));
         }
         if (reader.TrangThaiHoSo === 'BiKhoa') {
-            return next(
-                new ApiError(
-                    403,
-                    'Tài khoản mượn sách của bạn đã bị khóa. Vui lòng liên hệ nhân viên thư viện để được hỗ trợ.'
-                )
-            );
+            return next(new ApiError(403,
+                'Tài khoản mượn sách của bạn đã bị khóa. Vui lòng liên hệ nhân viên thư viện để được hỗ trợ.'
+            ));
         }
         // ── END GUARD ──────────────────────────────────────────────────
 
-        // Kiểm tra độc giả đã có phiếu mượn đang chờ duyệt chưa
+        // Không cho phép có 2 phiếu ChoDuyet cùng lúc
         const pendingRecord = await PhieuMuon.findOne({
             DocGiaId: reader._id,
             TrangThaiPhieu: 'ChoDuyet',
         });
         if (pendingRecord) {
-            return next(
-                new ApiError(400, 'Bạn đã có yêu cầu mượn đang chờ duyệt. Vui lòng chờ nhân viên xử lý.')
-            );
+            return next(new ApiError(400, 'Bạn đã có yêu cầu mượn đang chờ duyệt. Vui lòng chờ nhân viên xử lý.'));
         }
 
+        // Kiểm tra từng đầu sách có tồn tại và còn bản sẵn sàng không
+        const DauSach = require('../models/book.model');
+        const availabilityChecks = await Promise.all(
+            dauSachIds.map(async (dauSachId) => {
+                const ds = await DauSach.findById(dauSachId);
+                if (!ds) return { ok: false, msg: `Không tìm thấy đầu sách ID: ${dauSachId}` };
+                const sobanSanSang = await CuonSach.countDocuments({ DauSachId: dauSachId, TrangThai: 'SanSang' });
+                if (sobanSanSang === 0) return { ok: false, msg: `"${ds.TenSach}" hiện không có bản nào sẵn sàng để mượn.` };
+                return { ok: true };
+            })
+        );
 
-        // Kiểm tra từng cuốn sách có sẵn sàng không
-        const copies = await CuonSach.find({
-            _id: { $in: cuonSachIds },
-            TrangThai: 'SanSang',
-        });
+        const failed = availabilityChecks.find(c => !c.ok);
+        if (failed) return next(new ApiError(400, failed.msg));
 
-        if (copies.length !== cuonSachIds.length) {
-            return next(
-                new ApiError(400, 'Một hoặc nhiều cuốn sách không tồn tại hoặc không sẵn sàng để mượn')
-            );
-        }
-
-        // Tính HanTra mặc định
-        const hanTra = new Date();
-        hanTra.setDate(hanTra.getDate() + loanDurationDays);
-
-        // Xây dựng mảng chi tiết
-        const chiTiet = cuonSachIds.map((id) => ({
-            CuonSachId: id.toString(),
-            HanTra: hanTra,
+        // Tạo ChiTiet: chỉ có DauSachId, CuonSachId = null (staff gán sau)
+        const chiTiet = dauSachIds.map((id) => ({
+            DauSachId: id,
+            CuonSachId: null,
+            HanTra: null,
+            TrangThaiChiTiet: 'ChoGanBan',
         }));
 
         // Tạo phiếu mượn
@@ -178,12 +237,6 @@ exports.create = async (req, res, next) => {
             DocGiaId: reader._id,
             ChiTiet: chiTiet,
         });
-
-        // Cập nhật trạng thái cuốn sách → Pending (chờ duyệt)
-        await CuonSach.updateMany(
-            { _id: { $in: cuonSachIds } },
-            { $set: { TrangThai: 'Pending' } }
-        );
 
         // Gửi thông báo cho độc giả
         await createNotification(
@@ -203,48 +256,86 @@ exports.create = async (req, res, next) => {
 
 // ─────────────────────────────────────────────────────────────
 // PATCH /api/borrows/:id/approve
-// Nhân viên duyệt phiếu mượn → TrangThaiPhieu = 'DangMuon'
+// Nhân viên duyệt phiếu mượn và GÁN bản copy cho từng đầu sách.
+// Body: { assignments: [{ chiTietId, cuonSachId }] }
 // ─────────────────────────────────────────────────────────────
 exports.approve = async (req, res, next) => {
     try {
+        const { assignments } = req.body;
+        // assignments = [{ chiTietId: '...', cuonSachId: '...' }, ...]
+
+        if (!assignments || !Array.isArray(assignments) || assignments.length === 0) {
+            return next(new ApiError(400, 'Cần cung cấp danh sách gán bản sách (assignments)'));
+        }
+
         const record = await PhieuMuon.findById(req.params.id).populate('DocGiaId');
         if (!record) return next(new ApiError(404, 'Không tìm thấy phiếu mượn'));
 
         if (record.TrangThaiPhieu !== 'ChoDuyet') {
-            return next(
-                new ApiError(400, `Phiếu mượn ở trạng thái "${record.TrangThaiPhieu}", không thể duyệt`)
-            );
+            return next(new ApiError(400, `Phiếu mượn ở trạng thái "${record.TrangThaiPhieu}", không thể duyệt`));
         }
 
-        // Tìm hồ sơ nhân viên dựa trên req.user.id (TaiKhoan)
-        const staff = await NhanVien.findOne({ MaTaiKhoan: req.user.id });
-        if (!staff) return next(new ApiError(404, 'Không tìm thấy hồ sơ nhân viên'));
+        if (assignments.length !== record.ChiTiet.length) {
+            return next(new ApiError(400, `Cần gán đủ ${record.ChiTiet.length} bản sách cho ${record.ChiTiet.length} đầu sách trong phiếu`));
+        }
 
-        // Cập nhật phiếu: trạng thái + gán nhân viên duyệt
+        const staff = await NhanVien.findOne({ MaTaiKhoan: req.user.id });
+        if (!staff && req.user.role !== 'Admin') {
+            return next(new ApiError(404, 'Không tìm thấy hồ sơ nhân viên'));
+        }
+
+        // Tính hạn trả
+        const hanTra = new Date();
+        hanTra.setDate(hanTra.getDate() + loanDurationDays);
+
+        // Kiểm tra và gán từng bản copy
+        const cuonSachIdsToUpdate = [];
+        const dauSachIdsToUpdate = [];
+        for (const assign of assignments) {
+            const detail = record.ChiTiet.id(assign.chiTietId);
+            if (!detail) return next(new ApiError(404, `Không tìm thấy chi tiết mượn: ${assign.chiTietId}`));
+
+            // Kiểm tra bản copy còn sẵn sàng
+            const copy = await CuonSach.findOne({ _id: assign.cuonSachId, TrangThai: 'SanSang' });
+            if (!copy) return next(new ApiError(400, `Bản sách ID ${assign.cuonSachId} không tồn tại hoặc không sẵn sàng`));
+
+            detail.CuonSachId = assign.cuonSachId;
+            detail.HanTra = hanTra;
+            detail.TrangThaiChiTiet = 'DangMuon';
+            cuonSachIdsToUpdate.push(assign.cuonSachId);
+            dauSachIdsToUpdate.push(detail.DauSachId);
+        }
+
         record.TrangThaiPhieu = 'DangMuon';
-        record.NhanVienId = staff._id;
+        if (staff) {
+            record.NhanVienId = staff._id;
+        }
         await record.save();
 
-        // Cập nhật cuốn sách → DangMuon
-        const copyIds = record.ChiTiet.map((ct) => ct.CuonSachId);
+        // Cập nhật bản copy → DangMuon
         await CuonSach.updateMany(
-            { _id: { $in: copyIds } },
+            { _id: { $in: cuonSachIdsToUpdate } },
             { $set: { TrangThai: 'DangMuon' } }
         );
 
-        // Thông báo cho độc giả
-        const hanTra = record.ChiTiet[0]?.HanTra
-            ? new Date(record.ChiTiet[0].HanTra).toLocaleDateString('vi-VN')
-            : '';
+        // Tăng lượt mượn cho các đầu sách
+        if (dauSachIdsToUpdate.length > 0) {
+            const DauSach = require('../models/book.model');
+            await DauSach.updateMany(
+                { _id: { $in: dauSachIdsToUpdate } },
+                { $inc: { LuotMuon: 1 } }
+            );
+        }
 
         await createNotification(
             record.DocGiaId.MaTaiKhoan,
-            'Phiếu mượn đã được duyệt ✅',
-            `Phiếu mượn #${record._id} đã được duyệt. Bạn có thể nhận sách. Hạn trả: ${hanTra}.`
+            'Phiếu mượn đã được duyệt',
+            `Phiếu mượn #${record._id} đã được duyệt. Bạn có thể đến quầy nhận sách. Hạn trả: ${hanTra.toLocaleDateString('vi-VN')}.`
         );
 
         return res.status(200).json({ data: record, message: 'Duyệt phiếu mượn thành công' });
     } catch (error) {
+        console.error(error);
         return next(new ApiError(500, 'Lỗi khi duyệt phiếu mượn'));
     }
 };
@@ -266,25 +357,67 @@ exports.reject = async (req, res, next) => {
         }
 
         record.TrangThaiPhieu = 'DaHuy';
+        if (record.ChiTiet && record.ChiTiet.length > 0) {
+            record.ChiTiet.forEach(ct => {
+                ct.TrangThaiChiTiet = 'DaHuy';
+            });
+        }
         await record.save();
 
-        // Trả cuốn sách về trạng thái SanSang
-        const copyIds = record.ChiTiet.map((ct) => ct.CuonSachId);
-        await CuonSach.updateMany(
-            { _id: { $in: copyIds } },
-            { $set: { TrangThai: 'SanSang' } }
-        );
+        // Trả về SanSang những bản copy đã được gán (CuonSachId != null)
+        const copyIds = record.ChiTiet.map((ct) => ct.CuonSachId).filter(Boolean);
+        if (copyIds.length > 0) {
+            await CuonSach.updateMany(
+                { _id: { $in: copyIds } },
+                { $set: { TrangThai: 'SanSang' } }
+            );
+        }
 
         // Thông báo cho độc giả
         await createNotification(
             record.DocGiaId.MaTaiKhoan,
-            'Yêu cầu mượn sách bị từ chối ❌',
+            'Yêu cầu mượn sách bị từ chối',
             `Phiếu mượn #${record._id} đã bị từ chối.${lyDo ? ' Lý do: ' + lyDo : ''}`
         );
 
         return res.status(200).json({ message: 'Đã từ chối phiếu mượn' });
     } catch (error) {
         return next(new ApiError(500, 'Lỗi khi từ chối phiếu mượn'));
+    }
+};
+
+// ─────────────────────────────────────────────────────────────
+// PATCH /api/borrows/:id/cancel
+// Độc giả tự hủy phiếu mượn (chỉ hợp lệ khi trạng thái ChoDuyet)
+// ─────────────────────────────────────────────────────────────
+exports.cancel = async (req, res, next) => {
+    try {
+        const record = await PhieuMuon.findById(req.params.id).populate('DocGiaId');
+        if (!record) return next(new ApiError(404, 'Không tìm thấy phiếu mượn'));
+
+        // Kiểm tra quyền (chỉ người tạo mới được hủy)
+        const myReader = await DocGia.findOne({ MaTaiKhoan: req.user.id });
+        if (!myReader || record.DocGiaId._id.toString() !== myReader._id.toString()) {
+            return next(new ApiError(403, 'Bạn không có quyền hủy phiếu mượn này'));
+        }
+
+        if (record.TrangThaiPhieu !== 'ChoDuyet') {
+            return next(
+                new ApiError(400, `Phiếu mượn đã được xử lý (trạng thái: "${record.TrangThaiPhieu}"), không thể tự hủy`)
+            );
+        }
+
+        record.TrangThaiPhieu = 'DaHuy';
+        if (record.ChiTiet && record.ChiTiet.length > 0) {
+            record.ChiTiet.forEach(ct => {
+                ct.TrangThaiChiTiet = 'DaHuy';
+            });
+        }
+        await record.save();
+
+        return res.status(200).json({ message: 'Đã hủy phiếu mượn thành công' });
+    } catch (error) {
+        return next(new ApiError(500, 'Lỗi khi hủy phiếu mượn'));
     }
 };
 
@@ -372,7 +505,7 @@ exports.renew = async (req, res, next) => {
 // ─────────────────────────────────────────────────────────────
 exports.returnBook = async (req, res, next) => {
     try {
-        const { tinhTrangVatLy } = req.body;
+        const { tinhTrangVatLy = 'Tốt' } = req.body || {};
         const record = await PhieuMuon.findById(req.params.id).populate('DocGiaId');
         if (!record) return next(new ApiError(404, 'Không tìm thấy phiếu mượn'));
 

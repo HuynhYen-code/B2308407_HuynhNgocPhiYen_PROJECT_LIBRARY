@@ -28,6 +28,11 @@ const nhanVienSchema = new mongoose.Schema(
             type: String,
             trim: true,
         },
+        TrangThai: {
+            type: String,
+            enum: ['DangLamViec', 'NghiViec'],
+            default: 'DangLamViec',
+        }
     },
     { timestamps: true }
 );

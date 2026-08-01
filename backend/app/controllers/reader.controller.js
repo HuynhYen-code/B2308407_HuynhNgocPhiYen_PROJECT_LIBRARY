@@ -29,7 +29,7 @@ exports.getAll = async (req, res, next) => {
         const [readers, total] = await Promise.all([
             DocGia.find(filter)
                 .populate('MaTaiKhoan', '-password')
-                .sort({ createdAt: -1 })
+                .sort({ createdAt: -1, _id: 1 })
                 .skip(skip)
                 .limit(parseInt(limit)),
             DocGia.countDocuments(filter),
@@ -138,6 +138,10 @@ exports.remove = async (req, res, next) => {
         if (!reader) {
             return next(new ApiError(404, 'Không tìm thấy độc giả'));
         }
+
+        // Xóa luôn tài khoản liên kết
+        await User.findByIdAndDelete(reader.MaTaiKhoan);
+
         return res.status(200).json({ message: 'Xóa hồ sơ độc giả thành công' });
     } catch (error) {
         return next(new ApiError(500, 'Lỗi khi xóa hồ sơ độc giả'));
