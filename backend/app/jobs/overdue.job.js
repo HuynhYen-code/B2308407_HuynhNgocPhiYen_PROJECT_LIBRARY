@@ -116,7 +116,7 @@ async function task2_ProcessOverdue(today) {
     // Tìm tất cả phiếu đang mượn có chi tiết chưa trả và đã quá HanTra
     const records = await PhieuMuon.find({
         TrangThaiPhieu: 'DangMuon',
-        'ChiTiet.TrangThaiChiTiet': { $in: ['DangMuon', 'SapDenHan'] },
+        'ChiTiet.TrangThaiChiTiet': { $in: ['DangMuon', 'SapDenHan', 'QuaHan'] },
         'ChiTiet.HanTra': { $lt: startOfToday },
     }).populate('DocGiaId');
 
@@ -136,7 +136,7 @@ async function task2_ProcessOverdue(today) {
         let recordModified = false;
 
         for (const detail of record.ChiTiet) {
-            if (!['DangMuon', 'SapDenHan'].includes(detail.TrangThaiChiTiet)) continue;
+            if (!['DangMuon', 'SapDenHan', 'QuaHan'].includes(detail.TrangThaiChiTiet)) continue;
 
             const hanTra = new Date(detail.HanTra);
             hanTra.setHours(0, 0, 0, 0);
@@ -146,6 +146,9 @@ async function task2_ProcessOverdue(today) {
             // *** CORE BUSINESS LOGIC: Tính toán và ghi vào DB ***
             const soNgayTre = Math.floor((startOfToday - hanTra) / MS_PER_DAY);
             const tienPhat = soNgayTre * finePerDay;
+
+            // Nếu đã cập nhật rồi trong ngày hôm nay thì bỏ qua
+            if (detail.TrangThaiChiTiet === 'QuaHan' && detail.TienPhat === tienPhat) continue;
 
             // Ghi nhận biến đổi trạng thái vào cơ sở dữ liệu
             bulkOps.push({
@@ -161,9 +164,12 @@ async function task2_ProcessOverdue(today) {
             });
 
             // Thông báo là kết quả phụ họa từ biến đổi trạng thái
+            const isFirstTime = detail.TrangThaiChiTiet !== 'QuaHan';
+            const tieuDe = isFirstTime ? 'Quá hạn trả sách - Phát sinh phí phạt' : 'Cập nhật phí phạt quá hạn';
+
             notifications.push({
                 MaTaiKhoan: reader.MaTaiKhoan,
-                TieuDe: 'Quá hạn trả sách - Phát sinh phí phạt',
+                TieuDe: tieuDe,
                 NoiDung: `Bạn đã trễ hạn trả sách trong phiếu #${record._id} được ${soNgayTre} ngày. Tiền phạt hiện tại: ${tienPhat.toLocaleString('vi-VN')} VNĐ (${finePerDay.toLocaleString('vi-VN')} VNĐ/ngày). Vui lòng đến thư viện trả sách ngay để tránh phát sinh thêm phí.`,
                 NgayTao: new Date(),
             });
